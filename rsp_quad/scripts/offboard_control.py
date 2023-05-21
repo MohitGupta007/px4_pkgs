@@ -1,8 +1,4 @@
-"""
-Python implementation of Offboard Control
-
-"""
-
+#!/usr/bin/env python3
 
 import rclpy
 from rclpy.node import Node
@@ -25,9 +21,15 @@ class OffboardControl(Node):
     def __init__(self):
         super().__init__('OffboardControl')
         qos_profile = QoSProfile(
-            reliability=QoSReliabilityPolicy.RMW_QOS_POLICY_RELIABILITY_BEST_EFFORT,
-            durability=QoSDurabilityPolicy.RMW_QOS_POLICY_DURABILITY_TRANSIENT_LOCAL,
-            history=QoSHistoryPolicy.RMW_QOS_POLICY_HISTORY_KEEP_LAST,
+            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+            durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1
+        )
+        qos_profile2 = QoSProfile(
+            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+            durability=QoSDurabilityPolicy.VOLATILE,
+            history=QoSHistoryPolicy.KEEP_LAST,
             depth=1
         )
         self.status_sub = self.create_subscription(VehicleOdometry,
@@ -38,7 +40,7 @@ class OffboardControl(Node):
         self.markers_sub = self.create_subscription(MarkerArray,
                                                     '/camera/marker_publisher/markers',
                                                     self.markers_callback,
-                                                    qos_profile=0)
+                                                    qos_profile=1)
         self.markers_data_list = []
         self.current_markers_list = []
         self.current_mission_status = "TAKEOFF"
@@ -125,24 +127,25 @@ class OffboardControl(Node):
     def move_to_aruco(self,ar_id):
         try:
             ar_idx = self.current_markers_list.index(ar_id)
+            ar_pos = self.markers_data_list[ar_idx].pose.pose.position
+            self.goal = [self.veh_pos[0]-5*ar_pos.x*self.timer_period,self.veh_pos[1]-5*ar_pos.y*self.timer_period,-2.0,0.0]
+            self.publish_offboard_control_mode(mode="position")
+            err = sqrt((ar_pos.x)**2 + (ar_pos.y)**2)
+            print("Error to aruco: ",err)
+            if(err<0.3 and ar_id==1):
+                self.current_mission_status = "MOVE"
+                self.get_logger().info("Over aruco id: " + str(ar_id))
+                self.get_logger().info("Moving forward...")
+            elif(err<0.3 and ar_id==2):
+                self.current_mission_status = "PRE_LAND"
+                self.get_logger().info("Over aruco id: " + str(ar_id))
+                self.get_logger().info("Starting precision landing...")
+
         except:
             self.get_logger().info("Could not find aruco.")
             self.publish_offboard_control_mode(mode="position")
             return
 
-        ar_pos = self.markers_data_list[ar_idx].pose.pose.position
-        self.goal = [self.veh_pos[0]-5*ar_pos.x*self.timer_period,self.veh_pos[1]-5*ar_pos.y*self.timer_period,-2.0,0.0]
-        self.publish_offboard_control_mode(mode="position")
-        err = sqrt((ar_pos.x)**2 + (ar_pos.y)**2)
-        print("Error to aruco: ",err)
-        if(err<0.3 and ar_id==1):
-            self.current_mission_status = "MOVE"
-            self.get_logger().info("Over aruco id: " + str(ar_id))
-            self.get_logger().info("Moving forward...")
-        elif(err<0.3 and ar_id==2):
-            self.current_mission_status = "PRE_LAND"
-            self.get_logger().info("Over aruco id: " + str(ar_id))
-            self.get_logger().info("Starting precision landing...")
 
     # Moving in +x direction with constant speed
     def move_ahead(self):
@@ -154,24 +157,22 @@ class OffboardControl(Node):
     def precision_land(self,ar_id):
         try:
             ar_idx = self.current_markers_list.index(ar_id)
+            ar_pos = self.markers_data_list[ar_idx].pose.pose.position
+            self.get_logger().info(self.current_markers_list)
+            # self.goal = [self.veh_pos[0]-2*ar_pos.x*self.timer_period,self.veh_pos[1]-2*ar_pos.y*self.timer_period,self.veh_pos[2]+0.1,0.0]
+            self.goal = [self.veh_pos[0]-2*ar_pos.x*self.timer_period,self.veh_pos[1]-2*ar_pos.y*self.timer_period,self.veh_pos[2]+0.1,0.0]
+            self.publish_offboard_control_mode(mode="position")
+            if(abs(ar_pos.z)<1):
+                self.get_logger().info("Landing...")
+                self.current_mission_status = "LAND"
         except:
             self.get_logger().info("Could not find aruco.")
-            self.get_logger().info("Landing...")
-            self.current_mission_status = "LAND"
-            return
-
-        ar_pos = self.markers_data_list[ar_idx].pose.pose.position
-        print(ar_pos.z)
-        self.goal = [self.veh_pos[0]-5*ar_pos.x*self.timer_period,self.veh_pos[1]-5*ar_pos.y*self.timer_period,self.veh_pos[2]+0.1,0.0]
-        self.publish_offboard_control_mode(mode="position")
-        if(abs(ar_pos.z)<0.7):
             self.get_logger().info("Landing...")
             self.current_mission_status = "LAND"
 
     def land(self):
         self.publish_vehicle_command(VehicleCommand.VEHICLE_CMD_NAV_LAND,0.0)
         self.get_logger().info("Land command sent")
-        self.current_mission_status="COMPLETED"
 
     '''
 	Publish the offboard control mode.

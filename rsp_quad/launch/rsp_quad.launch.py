@@ -62,6 +62,13 @@ def generate_launch_description():
             ]
     )
 
+    offb_node = Node(
+        package='rsp_quad',
+        executable='offboard_control.py',
+        output='screen',
+        shell=True,
+    )
+
     return launch.LaunchDescription(
         [
          micro_ros_agent,
@@ -69,5 +76,6 @@ def generate_launch_description():
          camera_bridge,
          camera_info_bridge,
          aruco_node,
+         offb_node
         ]
     )
